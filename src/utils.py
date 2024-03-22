@@ -1,6 +1,8 @@
 import torch
 import torch.utils.data
 from torch.utils.data import TensorDataset
+import pickle
+import numpy as np
 
 
 class AverageMeter(object):
@@ -54,15 +56,53 @@ def get_default_train_val_test_loader(args):
     # get dataset-id
     dsid = args.dataset
 
-    # get dataset from .pt
-    data_train = torch.load(f'../data/UCR/{dsid}/X_train.pt')
-    data_val = torch.load(f'../data/UCR/{dsid}/X_valid.pt')
-    label_train = torch.load(f'../data/UCR/{dsid}/y_train.pt')
-    label_val = torch.load(f'../data/UCR/{dsid}/y_valid.pt')
+    # # get dataset from .pt
+    # data_train = torch.load(f'../data/UCR/{dsid}/X_train.pt')
+    # data_val = torch.load(f'../data/UCR/{dsid}/X_valid.pt')
+    # label_train = torch.load(f'../data/UCR/{dsid}/y_train.pt')
+    # label_val = torch.load(f'../data/UCR/{dsid}/y_valid.pt')
+
+    # print(data_train.shape)
+
+    with open(f'../data/mimic_mortal/train_raw.pkl', 'rb') as f:
+        train_raw = pickle.load(f)
+        f.close()
+
+    with open(f'../data/mimic_mortal/val_raw.pkl', 'rb') as f:
+        val_raw = pickle.load(f)
+        f.close()
+        
+    del f
+
+    data_train = train_raw[0]
+    data_val = val_raw[0]
+    label_train = train_raw[1]
+    label_val = val_raw[1]
+    
+    # move length (48) to last dimension
+    data_train = np.transpose(data_train, axes=(0, 2, 1))
+    data_val= np.transpose(data_val, axes=(0, 2, 1))
+    
+    # add additional dimension to be consistent with Todynet UEA dataset.
+    data_train = data_train.reshape(data_train.shape[0], 1, data_train.shape[1], data_train.shape[2])
+    data_val = data_val.reshape(data_val.shape[0], 1, data_val.shape[1], data_val.shape[2])
+
+    del train_raw, val_raw
+
+    data_train = torch.from_numpy(data_train)
+    data_val = torch.from_numpy(data_val)
+    label_train = torch.from_numpy(np.array(label_train))
+    label_val = torch.from_numpy(np.array(label_val))
+
+    print(data_train.shape)
+
 
     # init [num_variables, seq_length, num_classes]
+
+    # num features
     num_nodes = data_val.size(-2)
 
+    # dataset window (48)
     seq_length = data_val.size(-1)
     
     num_classes = len(torch.bincount(label_val.type(torch.int)))
