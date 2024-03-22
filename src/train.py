@@ -2,6 +2,7 @@ import argparse
 import time
 import gc
 import random
+import datetime
 
 import torch
 import torch.nn as nn
@@ -9,6 +10,8 @@ import torch.backends.cudnn as cudnn
 
 from net import GNNStack
 from utils import AverageMeter, accuracy, log_msg, get_default_train_val_test_loader
+
+from tensorboardX import SummaryWriter
 
 
 parser = argparse.ArgumentParser(description='PyTorch UEA Training')
@@ -23,9 +26,9 @@ parser.add_argument('--hidden_dim', type=int, default=128, help='hidden dimensio
 parser.add_argument('--out_dim', type=int, default=256, help='output dimensions of GNN stacks')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N', 
                     help='number of data loading workers (default: 0)')
-parser.add_argument('--epochs', default=2000, type=int, metavar='N', 
+parser.add_argument('--epochs', default=100, type=int, metavar='N', 
                     help='number of total epochs to run')
-parser.add_argument('-b', '--batch-size', default=16, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N',
                     help='mini-batch size (default: 16), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -62,6 +65,7 @@ def main():
 
 
 def main_work(args):
+    
     # init acc
     best_acc1 = 0
     
@@ -73,7 +77,6 @@ def main_work(args):
 
     if args.gpu is not None:
         print("Use GPU: {} for training".format(args.gpu))
-
 
     # dataset
     train_loader, val_loader, num_nodes, seq_length, num_classes = get_default_train_val_test_loader(args)
@@ -134,6 +137,12 @@ def main_work(args):
     epoches = []
 
     end = time.time()
+    # init tensorboard
+    current_time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    writer = SummaryWriter("tsboard/layers_" + str(args.num_layers) + "_groups_" + \
+                           str(args.groups) + "_pool_" + str(args.pool_ratio) + \
+                           "_learning-rate_" + str(args.lr) + "_" + current_time)
+
     for epoch in range(args.epochs):
         epoches += [epoch]
 
@@ -145,6 +154,9 @@ def main_work(args):
 
         msg = f'TRAIN, epoch {epoch}, loss {loss_train_per}, acc {acc_train_per}'
         log_msg(msg, log_file)
+        writer.add_scalar(f'train loss', loss_train_per, epoch)
+
+        writer.add_scalar(f'train acc', acc_train_per, epoch)
 
 
         # evaluate on validation set
@@ -155,10 +167,15 @@ def main_work(args):
 
         msg = f'VAL, loss {loss_val_per}, acc {acc_val_per}'
         log_msg(msg, log_file)
+        writer.add_scalar(f'val loss', loss_val_per, epoch)
+
+        writer.add_scalar(f'val acc', acc_val_per, epoch)
 
         # remember best acc
         best_acc1 = max(acc_val_per, best_acc1)
 
+    # flush tensorboard
+    writer.flush()
 
     # measure elapsed time
     dataset_time.update(time.time() - end)
@@ -176,6 +193,8 @@ def main_work(args):
     gc.collect()
     torch.cuda.empty_cache()
 
+    
+
 
 def train(train_loader, model, criterion, optimizer, lr_scheduler, args):
     losses = AverageMeter('Loss', ':.4e')
@@ -184,7 +203,7 @@ def train(train_loader, model, criterion, optimizer, lr_scheduler, args):
     # switch to train mode
     model.train()
 
-    for count, (data, label) in enumerate(train_loader):
+    for (data, label) in train_loader:
 
         # data in cuda
         data = data.cuda(args.gpu).type(torch.float)
@@ -218,7 +237,7 @@ def validate(val_loader, model, criterion, args):
     model.eval()
 
     with torch.no_grad():
-        for count, (data, label) in enumerate(val_loader):
+        for (data, label) in val_loader:
             if args.gpu is not None:
                 data = data.cuda(args.gpu, non_blocking=True).type(torch.float)
             if torch.cuda.is_available():
